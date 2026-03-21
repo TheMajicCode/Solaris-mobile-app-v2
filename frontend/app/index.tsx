@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { StyleSheet, View, Text, Animated, Dimensions, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -53,12 +53,13 @@ export default function SplashScreen() {
   const { user, loading } = useAuth();
   const [currentSlide, setCurrentSlide] = useState(0);
   const [showSlides, setShowSlides] = useState(false);
+  const hasNavigated = useRef(false);
   
   // Animations
-  const logoOpacity = React.useRef(new Animated.Value(0)).current;
-  const logoScale = React.useRef(new Animated.Value(0.8)).current;
-  const slideOpacity = React.useRef(new Animated.Value(0)).current;
-  const slideTranslate = React.useRef(new Animated.Value(30)).current;
+  const logoOpacity = useRef(new Animated.Value(0)).current;
+  const logoScale = useRef(new Animated.Value(0.8)).current;
+  const slideOpacity = useRef(new Animated.Value(0)).current;
+  const slideTranslate = useRef(new Animated.Value(30)).current;
 
   useEffect(() => {
     // Logo animation
@@ -75,25 +76,28 @@ export default function SplashScreen() {
         useNativeDriver: true,
       }),
     ]).start();
+  }, []);
 
-    // After logo animation, show slides or navigate
+  useEffect(() => {
+    // Only navigate once on initial load
+    if (loading || hasNavigated.current) return;
+
     const timer = setTimeout(() => {
-      if (!loading) {
-        if (user) {
-          if (user.onboarding_status === 'completed') {
-            router.replace('/(tabs)');
-          } else {
-            router.replace('/onboarding/profile');
-          }
+      if (user) {
+        hasNavigated.current = true;
+        if (user.onboarding_status === 'completed') {
+          router.replace('/(tabs)');
         } else {
-          setShowSlides(true);
-          animateSlide();
+          router.replace('/onboarding/profile');
         }
+      } else {
+        setShowSlides(true);
+        animateSlide();
       }
     }, 2000);
 
     return () => clearTimeout(timer);
-  }, [loading, user]);
+  }, [loading]);
 
   const animateSlide = () => {
     slideOpacity.setValue(0);

@@ -35,13 +35,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [sessionToken, setSessionToken] = useState<string | null>(null);
+  const [initialized, setInitialized] = useState(false);
 
-  // Check for existing session on mount
+  // Check for existing session on mount - only once
   const checkAuth = useCallback(async () => {
+    if (initialized) return;
+    
     try {
       const token = await AsyncStorage.getItem('session_token');
       if (!token) {
         setLoading(false);
+        setInitialized(true);
         return;
       }
       setSessionToken(token);
@@ -63,12 +67,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.error('Auth check error:', error);
     } finally {
       setLoading(false);
+      setInitialized(true);
     }
-  }, []);
+  }, [initialized]);
 
   useEffect(() => {
     checkAuth();
-  }, [checkAuth]);
+  }, []);
 
   // Handle OAuth callback
   const handleOAuthCallback = useCallback(async (url: string) => {
