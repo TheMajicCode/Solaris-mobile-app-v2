@@ -12,7 +12,7 @@ const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, signOut, sessionToken } = useAuth();
+  const { user, signOut, sessionToken, refreshUser } = useAuth();
   const [rewards, setRewards] = useState<any>(null);
   const [bookings, setBookings] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -42,6 +42,7 @@ export default function ProfileScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
+    await refreshUser(); // Refresh user data from server (will update admin role)
     await fetchData();
     setRefreshing(false);
   };
@@ -57,16 +58,24 @@ export default function ProfileScreen() {
     );
   };
 
+  const handleMenuPress = (label: string) => {
+    Alert.alert(
+      label,
+      'This feature is coming soon in a future update!',
+      [{ text: 'OK', style: 'default' }]
+    );
+  };
+
   const displayName = user?.display_name || user?.first_name || user?.name?.split(' ')[0] || 'User';
 
   const menuItems = [
-    { icon: 'person-outline', label: 'Personal Info', route: null },
-    { icon: 'heart-outline', label: 'Health Preferences', route: null },
-    { icon: 'notifications-outline', label: 'Notifications', route: null },
-    { icon: 'shield-checkmark-outline', label: 'Privacy & Data', route: null },
-    { icon: 'bookmark-outline', label: 'Saved Listings', route: null },
-    { icon: 'help-circle-outline', label: 'Help & Support', route: null },
-    { icon: 'information-circle-outline', label: 'About Solaris', route: null },
+    { icon: 'person-outline', label: 'Personal Info' },
+    { icon: 'heart-outline', label: 'Health Preferences' },
+    { icon: 'notifications-outline', label: 'Notifications' },
+    { icon: 'shield-checkmark-outline', label: 'Privacy & Data' },
+    { icon: 'bookmark-outline', label: 'Saved Listings' },
+    { icon: 'help-circle-outline', label: 'Help & Support' },
+    { icon: 'information-circle-outline', label: 'About Solaris' },
   ];
 
   return (
@@ -173,6 +182,7 @@ export default function ProfileScreen() {
               <TouchableOpacity 
                 key={item.label} 
                 style={[styles.menuItem, index < menuItems.length - 1 && styles.menuItemBorder]}
+                onPress={() => handleMenuPress(item.label)}
               >
                 <Ionicons name={item.icon as any} size={22} color={Colors.lightGray} />
                 <Text style={styles.menuLabel}>{item.label}</Text>
