@@ -945,6 +945,38 @@ async def admin_get_listings(admin: dict = Depends(require_admin)):
     listings = await db.listings.find({}, {"_id": 0}).to_list(500)
     return listings
 
+@api_router.put("/admin/users/{user_id}")
+async def admin_update_user(user_id: str, request: Request, admin: dict = Depends(require_admin)):
+    """Update user fields (admin only)"""
+    body = await request.json()
+    allowed_fields = {"role", "onboarding_status", "first_name", "last_name", "display_name", "phone", "city", "country"}
+    update_data = {k: v for k, v in body.items() if k in allowed_fields}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+    update_data["updated_at"] = datetime.now(timezone.utc)
+    result = await db.users.update_one({"user_id": user_id}, {"$set": update_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    updated_user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
+    return updated_user
+
+@api_router.get("/admin/rewards")
+async def admin_get_rewards(admin: dict = Depends(require_admin)):
+    """Get all rewards summary (admin only)"""
+    all_rewards = await db.reward_events.find({}, {"_id": 0}).sort("created_at", -1).to_list(500)
+    total_points = sum(r.get("points", 0) for r in all_rewards)
+    # Group by event type
+    by_type: Dict[str, int] = {}
+    for r in all_rewards:
+        t = r.get("event_type", "unknown")
+        by_type[t] = by_type.get(t, 0) + r.get("points", 0)
+    return {
+        "total_points_distributed": total_points,
+        "total_events": len(all_rewards),
+        "by_type": by_type,
+        "recent": all_rewards[:20]
+    }
+
 @api_router.get("/admin/bookings")
 async def admin_get_bookings(status: Optional[str] = None, admin: dict = Depends(require_admin)):
     """Get all bookings (admin only)"""
