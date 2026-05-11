@@ -158,6 +158,24 @@ class AdminEndpointTester:
         # 11. GET /api/admin/rewards - NEW endpoint
         self.test_endpoint_unauthenticated("/admin/rewards")
         
+        # 12. GET /api/admin/analytics - NEW endpoint
+        self.test_endpoint_unauthenticated("/admin/analytics")
+        
+        # 13. GET /api/admin/export/users - NEW CSV export endpoint
+        self.test_endpoint_unauthenticated("/admin/export/users")
+        
+        # 14. GET /api/admin/export/listings - NEW CSV export endpoint
+        self.test_endpoint_unauthenticated("/admin/export/listings")
+        
+        # 15. GET /api/admin/export/bookings - NEW CSV export endpoint
+        self.test_endpoint_unauthenticated("/admin/export/bookings")
+        
+        # 16. GET /api/admin/export/rewards - NEW CSV export endpoint
+        self.test_endpoint_unauthenticated("/admin/export/rewards")
+        
+        # 17. GET /api/admin/export/report - NEW PDF export endpoint
+        self.test_endpoint_unauthenticated("/admin/export/report")
+        
         # Summary
         print("=" * 80)
         print("TEST SUMMARY")

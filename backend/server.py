@@ -1,10 +1,12 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
+import io
+import csv
 from pathlib import Path
 from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional, Dict, Any
@@ -1030,6 +1032,278 @@ async def admin_get_stats(admin: dict = Depends(require_admin)):
         "published_listings": published_listings,
         "recent_users": recent_users
     }
+
+# ============= ANALYTICS ENDPOINTS =============
+
+@api_router.get("/admin/analytics")
+async def admin_analytics(admin: dict = Depends(require_admin)):
+    """Get comprehensive analytics data"""
+    now = datetime.now(timezone.utc)
+    
+    # User growth - last 30 days
+    user_growth = []
+    for i in range(30, -1, -1):
+        day = now - timedelta(days=i)
+        day_str = day.strftime("%Y-%m-%d")
+        count = await db.users.count_documents({
+            "created_at": {"$lte": day.replace(hour=23, minute=59, second=59)}
+        })
+        user_growth.append({"date": day_str, "total_users": count})
+    
+    # Booking trends
+    all_bookings = await db.booking_requests.find({}, {"_id": 0}).to_list(1000)
+    booking_by_status = {"pending": 0, "confirmed": 0, "completed": 0, "cancelled": 0}
+    booking_by_month = {}
+    for b in all_bookings:
+        status = b.get("status", "pending")
+        booking_by_status[status] = booking_by_status.get(status, 0) + 1
+        created = b.get("created_at")
+        if created:
+            if isinstance(created, str):
+                month_key = created[:7]
+            else:
+                month_key = created.strftime("%Y-%m")
+            booking_by_month[month_key] = booking_by_month.get(month_key, 0) + 1
+    
+    # Listing breakdown
+    all_listings = await db.listings.find({}, {"_id": 0}).to_list(500)
+    listing_by_type = {}
+    for l in all_listings:
+        lt = l.get("listing_type", "other")
+        listing_by_type[lt] = listing_by_type.get(lt, 0) + 1
+    
+    # Assessment stats
+    all_assessments = await db.assessment_responses.find({}, {"_id": 0}).to_list(500)
+    avg_vitality = 0
+    aspect_avgs = {"mental": [], "emotional": [], "physical": [], "spiritual": []}
+    for a in all_assessments:
+        if a.get("vitality_score"):
+            avg_vitality += a["vitality_score"]
+        for aspect in aspect_avgs:
+            score = a.get(f"{aspect}_score")
+            if score is not None:
+                aspect_avgs[aspect].append(score)
+    
+    total_a = len(all_assessments)
+    avg_vitality = round(avg_vitality / total_a, 1) if total_a > 0 else 0
+    aspect_averages = {}
+    for k, v in aspect_avgs.items():
+        aspect_averages[k] = round(sum(v) / len(v), 1) if v else 0
+    
+    # Revenue estimates from bookings
+    total_revenue_est = 0
+    for b in all_bookings:
+        if b.get("quoted_price"):
+            total_revenue_est += b["quoted_price"]
+    
+    # Reward points
+    total_points = 0
+    reward_events = await db.reward_events.find({}, {"_id": 0}).to_list(1000)
+    for r in reward_events:
+        total_points += r.get("points", 0)
+    
+    # Onboarding funnel
+    total_users = await db.users.count_documents({})
+    started_onboarding = await db.users.count_documents({"onboarding_status": {"$ne": "not_started"}})
+    completed_onboarding = await db.users.count_documents({"onboarding_status": "completed"})
+    
+    return {
+        "user_growth": user_growth,
+        "booking_by_status": booking_by_status,
+        "booking_by_month": booking_by_month,
+        "listing_by_type": listing_by_type,
+        "avg_vitality_score": avg_vitality,
+        "aspect_averages": aspect_averages,
+        "total_assessments": total_a,
+        "total_revenue_estimate": total_revenue_est,
+        "total_love_points": total_points,
+        "onboarding_funnel": {
+            "total_signups": total_users,
+            "started_onboarding": started_onboarding,
+            "completed_onboarding": completed_onboarding,
+            "completion_rate": round(completed_onboarding / total_users * 100, 1) if total_users > 0 else 0
+        }
+    }
+
+# ============= EXPORT ENDPOINTS =============
+
+def serialize_for_csv(value):
+    """Safely serialize values for CSV export"""
+    if value is None:
+        return ""
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(value, (list, dict)):
+        return str(value)
+    return str(value)
+
+@api_router.get("/admin/export/users")
+async def export_users_csv(admin: dict = Depends(require_admin)):
+    """Export all users to CSV"""
+    users = await db.users.find({}, {"_id": 0}).to_list(10000)
+    
+    output = io.StringIO()
+    fields = ["user_id", "email", "name", "role", "onboarding_status", "first_name", "last_name", "phone", "city", "country", "language", "created_at"]
+    writer = csv.DictWriter(output, fieldnames=fields, extrasaction='ignore')
+    writer.writeheader()
+    for u in users:
+        row = {k: serialize_for_csv(u.get(k)) for k in fields}
+        writer.writerow(row)
+    
+    output.seek(0)
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode('utf-8')),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=solaris_users_{datetime.now().strftime('%Y%m%d')}.csv"}
+    )
+
+@api_router.get("/admin/export/listings")
+async def export_listings_csv(admin: dict = Depends(require_admin)):
+    """Export all listings to CSV"""
+    listings = await db.listings.find({}, {"_id": 0}).to_list(10000)
+    
+    output = io.StringIO()
+    fields = ["listing_id", "listing_type", "node_type", "status", "title", "short_description", "tagline", "city", "country", "price_range_min", "price_range_max", "currency", "featured", "booking_enabled", "specialties", "tags", "created_at"]
+    writer = csv.DictWriter(output, fieldnames=fields, extrasaction='ignore')
+    writer.writeheader()
+    for l in listings:
+        row = {k: serialize_for_csv(l.get(k)) for k in fields}
+        writer.writerow(row)
+    
+    output.seek(0)
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode('utf-8')),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=solaris_listings_{datetime.now().strftime('%Y%m%d')}.csv"}
+    )
+
+@api_router.get("/admin/export/bookings")
+async def export_bookings_csv(admin: dict = Depends(require_admin)):
+    """Export all bookings to CSV"""
+    bookings = await db.booking_requests.find({}, {"_id": 0}).to_list(10000)
+    
+    output = io.StringIO()
+    fields = ["booking_id", "user_id", "listing_id", "status", "preferred_date", "preferred_time", "note", "admin_notes", "quoted_price", "payment_status", "created_at"]
+    writer = csv.DictWriter(output, fieldnames=fields, extrasaction='ignore')
+    writer.writeheader()
+    for b in bookings:
+        row = {k: serialize_for_csv(b.get(k)) for k in fields}
+        writer.writerow(row)
+    
+    output.seek(0)
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode('utf-8')),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=solaris_bookings_{datetime.now().strftime('%Y%m%d')}.csv"}
+    )
+
+@api_router.get("/admin/export/rewards")
+async def export_rewards_csv(admin: dict = Depends(require_admin)):
+    """Export all rewards to CSV"""
+    rewards = await db.reward_events.find({}, {"_id": 0}).to_list(10000)
+    
+    output = io.StringIO()
+    fields = ["event_id", "user_id", "event_type", "points", "category", "reference_id", "note", "created_at"]
+    writer = csv.DictWriter(output, fieldnames=fields, extrasaction='ignore')
+    writer.writeheader()
+    for r in rewards:
+        row = {k: serialize_for_csv(r.get(k)) for k in fields}
+        writer.writerow(row)
+    
+    output.seek(0)
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode('utf-8')),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=solaris_rewards_{datetime.now().strftime('%Y%m%d')}.csv"}
+    )
+
+@api_router.get("/admin/export/report")
+async def export_pdf_report(admin: dict = Depends(require_admin)):
+    """Generate a PDF summary report"""
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib import colors as rl_colors
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    
+    total_users = await db.users.count_documents({})
+    completed = await db.users.count_documents({"onboarding_status": "completed"})
+    total_listings = await db.listings.count_documents({})
+    published = await db.listings.count_documents({"status": "published"})
+    total_bookings = await db.booking_requests.count_documents({})
+    pending = await db.booking_requests.count_documents({"status": "pending"})
+    confirmed = await db.booking_requests.count_documents({"status": "confirmed"})
+    completed_b = await db.booking_requests.count_documents({"status": "completed"})
+    total_assessments = await db.assessment_responses.count_documents({})
+    
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=50, bottomMargin=50)
+    styles = getSampleStyleSheet()
+    
+    title_style = ParagraphStyle('CustomTitle', parent=styles['Title'], fontSize=24, spaceAfter=30, textColor=rl_colors.HexColor("#0A1628"))
+    heading_style = ParagraphStyle('CustomHeading', parent=styles['Heading2'], fontSize=16, spaceAfter=12, spaceBefore=20, textColor=rl_colors.HexColor("#059669"))
+    
+    elements = []
+    elements.append(Paragraph("Solaris Holistic Health", title_style))
+    elements.append(Paragraph(f"Admin Report — {datetime.now().strftime('%B %d, %Y')}", styles['Normal']))
+    elements.append(Spacer(1, 20))
+    
+    # Summary
+    elements.append(Paragraph("Platform Summary", heading_style))
+    summary_data = [
+        ["Metric", "Value"],
+        ["Total Users", str(total_users)],
+        ["Completed Onboarding", f"{completed} ({round(completed/total_users*100,1) if total_users else 0}%)"],
+        ["Assessments Completed", str(total_assessments)],
+        ["Total Listings", f"{total_listings} ({published} published)"],
+        ["Total Bookings", str(total_bookings)],
+        ["Pending Bookings", str(pending)],
+        ["Confirmed Bookings", str(confirmed)],
+        ["Completed Bookings", str(completed_b)],
+    ]
+    t = Table(summary_data, colWidths=[250, 200])
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), rl_colors.HexColor("#0A1628")),
+        ('TEXTCOLOR', (0, 0), (-1, 0), rl_colors.white),
+        ('FONTSIZE', (0, 0), (-1, -1), 11),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [rl_colors.HexColor("#F0FDF4"), rl_colors.white]),
+        ('GRID', (0, 0), (-1, -1), 0.5, rl_colors.grey),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+    ]))
+    elements.append(t)
+    elements.append(Spacer(1, 20))
+    
+    # Listings breakdown
+    listing_types = await db.listings.aggregate([
+        {"$group": {"_id": "$listing_type", "count": {"$sum": 1}}}
+    ]).to_list(20)
+    
+    if listing_types:
+        elements.append(Paragraph("Listings by Type", heading_style))
+        lt_data = [["Type", "Count"]]
+        for lt in listing_types:
+            lt_data.append([str(lt["_id"] or "Unknown").title(), str(lt["count"])])
+        t2 = Table(lt_data, colWidths=[250, 200])
+        t2.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), rl_colors.HexColor("#0A1628")),
+            ('TEXTCOLOR', (0, 0), (-1, 0), rl_colors.white),
+            ('GRID', (0, 0), (-1, -1), 0.5, rl_colors.grey),
+            ('TOPPADDING', (0, 0), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+        ]))
+        elements.append(t2)
+    
+    elements.append(Spacer(1, 30))
+    elements.append(Paragraph(f"Generated by Solaris Admin System • {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}", styles['Normal']))
+    
+    doc.build(elements)
+    buffer.seek(0)
+    
+    return StreamingResponse(
+        buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=solaris_report_{datetime.now().strftime('%Y%m%d')}.pdf"}
+    )
 
 # ============= SEED DATA =============
 

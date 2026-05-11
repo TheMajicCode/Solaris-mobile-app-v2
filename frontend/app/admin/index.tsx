@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { StyleSheet, View, Text, ScrollView, TouchableOpacity, RefreshControl, Modal, TextInput, Alert, ActivityIndicator } from 'react-native';
+import { StyleSheet, View, Text, ScrollView, TouchableOpacity, RefreshControl, Modal, TextInput, Alert, ActivityIndicator, Linking, Image, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,8 +9,9 @@ import { Button } from '../../src/components/Button';
 import { useAuth } from '../../src/context/AuthContext';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+const SOLARIS_LOGO = require('../../assets/images/solaris-logo.png');
 
-type AdminTab = 'overview' | 'users' | 'listings' | 'bookings' | 'rewards' | 'settings';
+type AdminTab = 'overview' | 'users' | 'listings' | 'bookings' | 'analytics' | 'settings';
 
 const listingTypes = ['practitioner', 'clinic', 'service', 'workshop', 'place', 'program', 'diagnostics', 'kitchen'];
 const nodeTypes = ['care_node', 'practitioner_node', 'protocol_node', 'experience_node', 'place_node', 'education_node', 'commerce_node'];
@@ -25,6 +26,7 @@ export default function AdminDashboard() {
   const [listings, setListings] = useState<any[]>([]);
   const [bookings, setBookings] = useState<any[]>([]);
   const [rewards, setRewards] = useState<any>(null);
+  const [analytics, setAnalytics] = useState<any>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   
@@ -70,12 +72,13 @@ export default function AdminDashboard() {
     try {
       const headers = { 'Authorization': `Bearer ${sessionToken}` };
       
-      const [statsRes, usersRes, listingsRes, bookingsRes, rewardsRes] = await Promise.all([
+      const [statsRes, usersRes, listingsRes, bookingsRes, rewardsRes, analyticsRes] = await Promise.all([
         fetch(`${API_URL}/api/admin/stats`, { headers }),
         fetch(`${API_URL}/api/admin/users`, { headers }),
         fetch(`${API_URL}/api/admin/listings`, { headers }),
         fetch(`${API_URL}/api/admin/bookings`, { headers }),
         fetch(`${API_URL}/api/admin/rewards`, { headers }),
+        fetch(`${API_URL}/api/admin/analytics`, { headers }),
       ]);
       
       if (statsRes.ok) setStats(await statsRes.json());
@@ -83,6 +86,7 @@ export default function AdminDashboard() {
       if (listingsRes.ok) setListings(await listingsRes.json());
       if (bookingsRes.ok) setBookings(await bookingsRes.json());
       if (rewardsRes.ok) setRewards(await rewardsRes.json());
+      if (analyticsRes.ok) setAnalytics(await analyticsRes.json());
       
     } catch (error) {
       console.error('Admin fetch error:', error);
@@ -265,9 +269,36 @@ export default function AdminDashboard() {
     { id: 'users', label: 'Users', icon: 'people-outline' },
     { id: 'listings', label: 'Listings', icon: 'list-outline' },
     { id: 'bookings', label: 'Bookings', icon: 'calendar-outline' },
-    { id: 'rewards', label: 'Rewards', icon: 'gift-outline' },
-    { id: 'settings', label: 'Settings', icon: 'settings-outline' },
+    { id: 'analytics', label: 'Analytics', icon: 'analytics-outline' },
+    { id: 'settings', label: 'Exports', icon: 'download-outline' },
   ];
+
+  const handleExport = async (type: string) => {
+    try {
+      const url = `${API_URL}/api/admin/export/${type}`;
+      if (Platform.OS === 'web') {
+        const response = await fetch(url, {
+          headers: { 'Authorization': `Bearer ${sessionToken}` },
+        });
+        if (response.ok) {
+          const blob = await response.blob();
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(blob);
+          const cd = response.headers.get('content-disposition');
+          const filename = cd?.split('filename=')[1] || `solaris_${type}.csv`;
+          link.download = filename;
+          link.click();
+          Alert.alert('Success', `${type} export downloaded!`);
+        } else {
+          Alert.alert('Error', 'Export failed');
+        }
+      } else {
+        await Linking.openURL(url);
+      }
+    } catch (error) {
+      Alert.alert('Error', `Failed to export ${type}`);
+    }
+  };
 
   // Overview Tab
   const renderOverview = () => (
@@ -642,137 +673,187 @@ export default function AdminDashboard() {
     </View>
   );
 
-  // Rewards Tab
-  const renderRewards = () => {
-    return (
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Rewards & LOVE Points</Text>
-        
-        <Card variant="glass" style={styles.rewardsOverview}>
+  // Analytics Tab
+  const renderAnalytics = () => (
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>Platform Analytics</Text>
+      
+      {/* Onboarding Funnel */}
+      <Card variant="glass" style={{ padding: Spacing.lg, marginBottom: Spacing.lg }}>
+        <Text style={styles.cardTitle}>Onboarding Funnel</Text>
+        <View style={styles.funnelContainer}>
+          {[
+            { label: 'Signups', value: analytics?.onboarding_funnel?.total_signups || 0, color: Colors.info },
+            { label: 'Started', value: analytics?.onboarding_funnel?.started_onboarding || 0, color: Colors.gold },
+            { label: 'Completed', value: analytics?.onboarding_funnel?.completed_onboarding || 0, color: Colors.emerald },
+          ].map((item, idx) => (
+            <View key={item.label} style={styles.funnelItem}>
+              <View style={[styles.funnelBar, { backgroundColor: item.color, height: Math.max(30, (item.value / Math.max(analytics?.onboarding_funnel?.total_signups || 1, 1)) * 100) }]} />
+              <Text style={[styles.funnelValue, { color: item.color }]}>{item.value}</Text>
+              <Text style={styles.funnelLabel}>{item.label}</Text>
+            </View>
+          ))}
+        </View>
+        <Text style={styles.analyticsSubtext}>
+          Completion Rate: {analytics?.onboarding_funnel?.completion_rate || 0}%
+        </Text>
+      </Card>
+
+      {/* Wellness Scores */}
+      <Card variant="glass" style={{ padding: Spacing.lg, marginBottom: Spacing.lg }}>
+        <Text style={styles.cardTitle}>Average Wellness Scores</Text>
+        <Text style={styles.analyticsSubtext}>{analytics?.total_assessments || 0} assessments completed</Text>
+        <View style={{ marginTop: Spacing.md }}>
+          {['mental', 'emotional', 'physical', 'spiritual'].map(aspect => {
+            const score = analytics?.aspect_averages?.[aspect] || 0;
+            return (
+              <View key={aspect} style={styles.scoreBarRow}>
+                <Text style={styles.scoreBarLabel}>{aspect.charAt(0).toUpperCase() + aspect.slice(1)}</Text>
+                <View style={styles.scoreBarTrack}>
+                  <View style={[styles.scoreBarFill, { width: `${score}%`, backgroundColor: aspect === 'mental' ? Colors.info : aspect === 'emotional' ? Colors.gold : aspect === 'physical' ? Colors.emerald : Colors.teal }]} />
+                </View>
+                <Text style={styles.scoreBarValue}>{score}</Text>
+              </View>
+            );
+          })}
+        </View>
+        <View style={styles.vitalityScoreRow}>
+          <Text style={styles.vitalityLabel}>Avg Vitality Score</Text>
+          <Text style={styles.vitalityValue}>{analytics?.avg_vitality_score || 0}</Text>
+        </View>
+      </Card>
+
+      {/* Booking Pipeline */}
+      <Card variant="glass" style={{ padding: Spacing.lg, marginBottom: Spacing.lg }}>
+        <Text style={styles.cardTitle}>Booking Pipeline</Text>
+        <View style={styles.pipelineGrid}>
+          {Object.entries(analytics?.booking_by_status || {}).map(([status, count]) => (
+            <View key={status} style={styles.pipelineItem}>
+              <Text style={[styles.pipelineValue, { 
+                color: status === 'confirmed' ? Colors.emerald : 
+                       status === 'completed' ? Colors.teal : 
+                       status === 'cancelled' ? Colors.error : Colors.gold 
+              }]}>{count as number}</Text>
+              <Text style={styles.pipelineLabel}>{status.charAt(0).toUpperCase() + status.slice(1)}</Text>
+            </View>
+          ))}
+        </View>
+      </Card>
+
+      {/* Listings by Type */}
+      <Card variant="glass" style={{ padding: Spacing.lg, marginBottom: Spacing.lg }}>
+        <Text style={styles.cardTitle}>Listings by Type</Text>
+        {Object.entries(analytics?.listing_by_type || {}).map(([type, count]) => (
+          <View key={type} style={styles.typeRow}>
+            <View style={styles.typeIconSmall}>
+              <Ionicons 
+                name={
+                  type === 'practitioner' ? 'person' : type === 'clinic' ? 'business' :
+                  type === 'workshop' ? 'school' : type === 'place' ? 'location' :
+                  type === 'service' ? 'medical' : type === 'program' ? 'fitness' : 'grid'
+                } 
+                size={16} color={Colors.emerald} 
+              />
+            </View>
+            <Text style={styles.typeLabel}>{type.charAt(0).toUpperCase() + type.slice(1)}</Text>
+            <Text style={styles.typeCount}>{count as number}</Text>
+          </View>
+        ))}
+      </Card>
+
+      {/* Rewards Summary */}
+      <Card variant="glass" style={{ padding: Spacing.lg, marginBottom: Spacing.lg }}>
+        <Text style={styles.cardTitle}>LOVE Points Economy</Text>
+        <View style={styles.rewardsOverview}>
           <View style={styles.rewardsStat}>
-            <Text style={styles.rewardsValue}>{rewards?.total_points_distributed || 0}</Text>
-            <Text style={styles.rewardsLabel}>Total Points Distributed</Text>
+            <Text style={styles.rewardsValue}>{rewards?.total_points_distributed || analytics?.total_love_points || 0}</Text>
+            <Text style={styles.rewardsLabel}>Total Distributed</Text>
           </View>
           <View style={styles.rewardsDivider} />
           <View style={styles.rewardsStat}>
             <Text style={styles.rewardsValue}>{rewards?.total_events || 0}</Text>
-            <Text style={styles.rewardsLabel}>Total Events</Text>
+            <Text style={styles.rewardsLabel}>Events</Text>
           </View>
-        </Card>
-
-        {/* Points by Type */}
+        </View>
         {rewards?.by_type && Object.keys(rewards.by_type).length > 0 && (
-          <>
-            <Text style={[styles.sectionTitle, { marginTop: Spacing.lg }]}>Points by Activity</Text>
-            <Card variant="default">
-              {Object.entries(rewards.by_type).map(([eventType, points], idx) => (
-                <View key={eventType} style={[styles.pointRow, idx < Object.keys(rewards.by_type).length - 1 && styles.rowBorder]}>
-                  <Text style={styles.pointEvent}>
-                    {eventType.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
-                  </Text>
-                  <Text style={styles.pointValue}>{points as number} LOVE</Text>
-                </View>
-              ))}
-            </Card>
-          </>
-        )}
-
-        {/* Recent Reward Events */}
-        {rewards?.recent && rewards.recent.length > 0 && (
-          <>
-            <Text style={[styles.sectionTitle, { marginTop: Spacing.lg }]}>Recent Activity</Text>
-            {rewards.recent.slice(0, 10).map((r: any, idx: number) => (
-              <Card key={r.event_id || idx} variant="default" style={styles.itemCard}>
-                <View style={styles.rewardEventRow}>
-                  <View style={styles.rewardEventIcon}>
-                    <Ionicons 
-                      name={
-                        r.event_type === 'account_created' ? 'person-add' :
-                        r.event_type === 'assessment_completed' ? 'document-text' :
-                        r.event_type === 'daily_checkin' ? 'sunny' :
-                        r.event_type === 'booking_request' ? 'calendar' : 'gift'
-                      } 
-                      size={18} 
-                      color={Colors.gold} 
-                    />
-                  </View>
-                  <View style={styles.rewardEventInfo}>
-                    <Text style={styles.rewardEventType}>
-                      {r.event_type.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}
-                    </Text>
-                    {r.note && <Text style={styles.rewardEventNote}>{r.note}</Text>}
-                    <Text style={styles.rewardEventUser}>User: {r.user_id}</Text>
-                  </View>
-                  <Text style={styles.rewardEventPoints}>+{r.points}</Text>
-                </View>
-              </Card>
+          <View style={{ marginTop: Spacing.md }}>
+            {Object.entries(rewards.by_type).map(([type, pts]) => (
+              <View key={type} style={[styles.pointRow, styles.rowBorder]}>
+                <Text style={styles.pointEvent}>{type.replace(/_/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase())}</Text>
+                <Text style={styles.pointValue}>{pts as number} LOVE</Text>
+              </View>
             ))}
-          </>
+          </View>
         )}
-        
-        <Text style={[styles.sectionTitle, { marginTop: Spacing.lg }]}>Point Values Reference</Text>
-        <Card variant="default">
-          {[
-            { event: 'Account Creation', points: 100 },
-            { event: 'Onboarding Complete', points: 150 },
-            { event: 'Assessment Complete', points: 250 },
-            { event: 'Daily Check-in', points: 25 },
-            { event: 'Booking Request', points: 50 },
-            { event: '7-Day Streak', points: 100 },
-            { event: 'Referral', points: 200 },
-          ].map((item, idx) => (
-            <View key={item.event} style={[styles.pointRow, idx < 6 && styles.rowBorder]}>
-              <Text style={styles.pointEvent}>{item.event}</Text>
-              <Text style={styles.pointValue}>+{item.points} LOVE</Text>
-            </View>
-          ))}
-        </Card>
-      </View>
-    );
-  };
+      </Card>
+    </View>
+  );
 
-  // Settings Tab
+  // Exports Tab
   const renderSettings = () => (
     <View style={styles.section}>
-      <Text style={styles.sectionTitle}>Admin Settings</Text>
+      <Image source={SOLARIS_LOGO} style={{ width: 60, height: 60, alignSelf: 'center', marginBottom: Spacing.md }} resizeMode="contain" />
+      <Text style={[styles.sectionTitle, { textAlign: 'center' }]}>Export & Reports</Text>
       
-      <Card variant="default" style={styles.settingsCard}>
-        <TouchableOpacity style={styles.settingsItem}>
-          <Ionicons name="notifications-outline" size={22} color={Colors.lightGray} />
-          <Text style={styles.settingsLabel}>Notification Settings</Text>
-          <Ionicons name="chevron-forward" size={18} color={Colors.mediumGray} />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.settingsItem}>
-          <Ionicons name="color-palette-outline" size={22} color={Colors.lightGray} />
-          <Text style={styles.settingsLabel}>Branding & Content</Text>
-          <Ionicons name="chevron-forward" size={18} color={Colors.mediumGray} />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.settingsItem}>
-          <Ionicons name="analytics-outline" size={22} color={Colors.lightGray} />
-          <Text style={styles.settingsLabel}>Analytics & Reports</Text>
-          <Ionicons name="chevron-forward" size={18} color={Colors.mediumGray} />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.settingsItem}>
-          <Ionicons name="shield-outline" size={22} color={Colors.lightGray} />
-          <Text style={styles.settingsLabel}>Privacy & Compliance</Text>
-          <Ionicons name="chevron-forward" size={18} color={Colors.mediumGray} />
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.settingsItem, { borderBottomWidth: 0 }]}>
-          <Ionicons name="download-outline" size={22} color={Colors.lightGray} />
-          <Text style={styles.settingsLabel}>Export Data</Text>
-          <Ionicons name="chevron-forward" size={18} color={Colors.mediumGray} />
+      <Text style={[styles.sectionTitle, { marginTop: Spacing.lg }]}>Download CSV</Text>
+      <Card variant="default" style={{ padding: 0 }}>
+        {[
+          { label: 'Export Users', icon: 'people-outline', type: 'users', desc: 'All user accounts with profile data' },
+          { label: 'Export Listings', icon: 'list-outline', type: 'listings', desc: 'All practitioners, clinics, services' },
+          { label: 'Export Bookings', icon: 'calendar-outline', type: 'bookings', desc: 'All booking requests with status' },
+          { label: 'Export Rewards', icon: 'gift-outline', type: 'rewards', desc: 'All LOVE point transactions' },
+        ].map((item, idx) => (
+          <TouchableOpacity 
+            key={item.type}
+            style={[styles.settingsItem, idx === 3 && { borderBottomWidth: 0 }]}
+            onPress={() => handleExport(item.type)}
+          >
+            <View style={[styles.exportIcon, { backgroundColor: `${Colors.emerald}15` }]}>
+              <Ionicons name={item.icon as any} size={20} color={Colors.emerald} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.settingsLabel}>{item.label}</Text>
+              <Text style={styles.exportDesc}>{item.desc}</Text>
+            </View>
+            <Ionicons name="download-outline" size={20} color={Colors.emerald} />
+          </TouchableOpacity>
+        ))}
+      </Card>
+
+      <Text style={[styles.sectionTitle, { marginTop: Spacing.lg }]}>PDF Report</Text>
+      <Card variant="default">
+        <TouchableOpacity 
+          style={styles.pdfExportBtn}
+          onPress={() => handleExport('report')}
+        >
+          <View style={[styles.exportIcon, { backgroundColor: `${Colors.gold}15` }]}>
+            <Ionicons name="document-text" size={24} color={Colors.gold} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.settingsLabel, { fontSize: 16, fontWeight: '600' }]}>Generate Full Report</Text>
+            <Text style={styles.exportDesc}>PDF summary with all platform metrics, listings breakdown, and booking analytics</Text>
+          </View>
+          <Ionicons name="arrow-forward-circle" size={24} color={Colors.gold} />
         </TouchableOpacity>
       </Card>
-      
-      <Text style={[styles.sectionTitle, { marginTop: Spacing.lg }]}>Environment</Text>
+
+      <Text style={[styles.sectionTitle, { marginTop: Spacing.lg }]}>Platform Info</Text>
       <Card variant="default">
         <View style={styles.envItem}>
-          <Text style={styles.envLabel}>API URL</Text>
-          <Text style={styles.envValue}>{API_URL || 'Not set'}</Text>
+          <Text style={styles.envLabel}>Version</Text>
+          <Text style={styles.envValue}>1.0.5 MVP</Text>
         </View>
         <View style={styles.envItem}>
-          <Text style={styles.envLabel}>Version</Text>
-          <Text style={styles.envValue}>1.0.0 MVP</Text>
+          <Text style={styles.envLabel}>Total Users</Text>
+          <Text style={styles.envValue}>{stats?.total_users || 0}</Text>
+        </View>
+        <View style={styles.envItem}>
+          <Text style={styles.envLabel}>Published Listings</Text>
+          <Text style={styles.envValue}>{stats?.published_listings || 0}</Text>
+        </View>
+        <View style={[styles.envItem, { borderBottomWidth: 0 }]}>
+          <Text style={styles.envLabel}>Pending Bookings</Text>
+          <Text style={[styles.envValue, { color: Colors.gold }]}>{stats?.pending_bookings || 0}</Text>
         </View>
       </Card>
     </View>
@@ -796,6 +877,7 @@ export default function AdminDashboard() {
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color={Colors.white} />
         </TouchableOpacity>
+        <Image source={SOLARIS_LOGO} style={{ width: 36, height: 36, marginLeft: Spacing.sm }} resizeMode="contain" />
         <View style={styles.headerContent}>
           <Text style={styles.title}>Admin Dashboard</Text>
           <Text style={styles.subtitle}>Solaris Management</Text>
@@ -842,7 +924,7 @@ export default function AdminDashboard() {
         {activeTab === 'users' && renderUsers()}
         {activeTab === 'listings' && renderListings()}
         {activeTab === 'bookings' && renderBookings()}
-        {activeTab === 'rewards' && renderRewards()}
+        {activeTab === 'analytics' && renderAnalytics()}
         {activeTab === 'settings' && renderSettings()}
       </ScrollView>
 
@@ -2035,5 +2117,146 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
     color: Colors.emerald,
+  },
+  funnelContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'flex-end',
+    height: 130,
+    marginTop: Spacing.md,
+  },
+  funnelItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  funnelBar: {
+    width: 40,
+    borderRadius: 8,
+    marginBottom: Spacing.sm,
+    minHeight: 20,
+  },
+  funnelValue: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  funnelLabel: {
+    fontSize: 11,
+    color: Colors.mediumGray,
+    marginTop: 2,
+  },
+  analyticsSubtext: {
+    fontSize: 12,
+    color: Colors.mediumGray,
+    marginTop: Spacing.sm,
+    textAlign: 'center',
+  },
+  scoreBarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: Spacing.sm,
+  },
+  scoreBarLabel: {
+    fontSize: 13,
+    color: Colors.lightGray,
+    width: 75,
+  },
+  scoreBarTrack: {
+    flex: 1,
+    height: 8,
+    backgroundColor: Colors.darkBlue,
+    borderRadius: 4,
+    marginHorizontal: Spacing.sm,
+    overflow: 'hidden',
+  },
+  scoreBarFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  scoreBarValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: Colors.white,
+    width: 35,
+    textAlign: 'right',
+  },
+  vitalityScoreRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: Spacing.lg,
+    paddingTop: Spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: Colors.darkBlue,
+  },
+  vitalityLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.lightGray,
+  },
+  vitalityValue: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: Colors.emerald,
+  },
+  pipelineGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginTop: Spacing.md,
+  },
+  pipelineItem: {
+    alignItems: 'center',
+  },
+  pipelineValue: {
+    fontSize: 24,
+    fontWeight: '700',
+  },
+  pipelineLabel: {
+    fontSize: 11,
+    color: Colors.mediumGray,
+    marginTop: 2,
+  },
+  typeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: Spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.darkBlue,
+  },
+  typeIconSmall: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: `${Colors.emerald}15`,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: Spacing.md,
+  },
+  typeLabel: {
+    flex: 1,
+    fontSize: 14,
+    color: Colors.lightGray,
+  },
+  typeCount: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.white,
+  },
+  exportIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: Spacing.md,
+  },
+  exportDesc: {
+    fontSize: 12,
+    color: Colors.mediumGray,
+    marginTop: 2,
+  },
+  pdfExportBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: Spacing.sm,
   },
 });

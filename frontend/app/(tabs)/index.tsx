@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, View, Text, ScrollView, TouchableOpacity, RefreshControl } from 'react-native';
+import { StyleSheet, View, Text, ScrollView, TouchableOpacity, RefreshControl, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,6 +10,7 @@ import { Button } from '../../src/components/Button';
 import { useAuth } from '../../src/context/AuthContext';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+const SOLARIS_LOGO = require('../../assets/images/solaris-logo.png');
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -75,9 +76,12 @@ export default function HomeScreen() {
       >
         {/* Header */}
         <View style={styles.header}>
-          <View>
-            <Text style={styles.greeting}>{greeting()},</Text>
-            <Text style={styles.name}>{displayName}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Image source={SOLARIS_LOGO} style={{ width: 36, height: 36, marginRight: 12 }} resizeMode="contain" />
+            <View>
+              <Text style={styles.greeting}>{greeting()},</Text>
+              <Text style={styles.name}>{displayName}</Text>
+            </View>
           </View>
           <TouchableOpacity style={styles.notificationButton}>
             <Ionicons name="notifications-outline" size={24} color={Colors.white} />

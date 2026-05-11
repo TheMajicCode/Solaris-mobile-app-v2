@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { StyleSheet, View, Text, Animated, Dimensions, Image } from 'react-native';
+import { StyleSheet, View, Text, Animated, Dimensions, Image, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
+import { Video, ResizeMode } from 'expo-av';
 import { Colors } from '../src/constants/colors';
 import { useAuth } from '../src/context/AuthContext';
 import { Button } from '../src/components/Button';
@@ -9,7 +10,9 @@ import { Ionicons } from '@expo/vector-icons';
 
 const { width, height } = Dimensions.get('window');
 
-// Onboarding slides data
+const SOLARIS_LOGO = require('../assets/images/solaris-logo.png');
+const SOLARIS_VIDEO = require('../assets/images/solaris-splash.mp4');
+
 const slides = [
   {
     id: 'welcome',
@@ -53,20 +56,19 @@ export default function SplashScreen() {
   const { user, loading } = useAuth();
   const [currentSlide, setCurrentSlide] = useState(0);
   const [showSlides, setShowSlides] = useState(false);
+  const [videoFinished, setVideoFinished] = useState(false);
   const hasNavigated = useRef(false);
   
-  // Animations
   const logoOpacity = useRef(new Animated.Value(0)).current;
   const logoScale = useRef(new Animated.Value(0.8)).current;
   const slideOpacity = useRef(new Animated.Value(0)).current;
   const slideTranslate = useRef(new Animated.Value(30)).current;
 
   useEffect(() => {
-    // Logo animation
     Animated.parallel([
       Animated.timing(logoOpacity, {
         toValue: 1,
-        duration: 1000,
+        duration: 1200,
         useNativeDriver: true,
       }),
       Animated.spring(logoScale, {
@@ -79,7 +81,6 @@ export default function SplashScreen() {
   }, []);
 
   useEffect(() => {
-    // Only navigate once on initial load
     if (loading || hasNavigated.current) return;
 
     const timer = setTimeout(() => {
@@ -94,7 +95,7 @@ export default function SplashScreen() {
         setShowSlides(true);
         animateSlide();
       }
-    }, 2000);
+    }, 3000);
 
     return () => clearTimeout(timer);
   }, [loading]);
@@ -132,68 +133,59 @@ export default function SplashScreen() {
   const slide = slides[currentSlide];
 
   return (
-    <LinearGradient colors={Colors.gradientPrimary} style={styles.container}>
-      {/* Background glow effects */}
-      <View style={styles.glowContainer}>
-        <View style={[styles.glow, styles.glowTop]} />
-        <View style={[styles.glow, styles.glowBottom]} />
-      </View>
-
+    <View style={styles.container}>
+      <LinearGradient colors={['#000000', '#0A1628', '#0F2340']} style={StyleSheet.absoluteFillObject} />
+      
       {!showSlides ? (
-        // Splash Logo
         <Animated.View
           style={[
-            styles.logoContainer,
-            {
-              opacity: logoOpacity,
-              transform: [{ scale: logoScale }],
-            },
+            styles.splashContainer,
+            { opacity: logoOpacity, transform: [{ scale: logoScale }] },
           ]}
         >
-          <View style={styles.logoCircle}>
-            <Ionicons name="sunny" size={60} color={Colors.emerald} />
-          </View>
-          <Text style={styles.logoText}>SOLARIS</Text>
-          <Text style={styles.logoSubtext}>HOLISTIC HEALTH</Text>
+          <Video
+            source={SOLARIS_VIDEO}
+            style={styles.splashVideo}
+            resizeMode={ResizeMode.CONTAIN}
+            shouldPlay
+            isLooping={false}
+            isMuted
+            onPlaybackStatusUpdate={(status) => {
+              if (status.isLoaded && status.didJustFinish) {
+                setVideoFinished(true);
+              }
+            }}
+          />
+          {videoFinished && (
+            <Animated.View style={styles.splashLogoFallback}>
+              <Image source={SOLARIS_LOGO} style={styles.logoImage} resizeMode="contain" />
+            </Animated.View>
+          )}
         </Animated.View>
       ) : (
-        // Onboarding Slides
         <View style={styles.slideContainer}>
           <Animated.View
             style={[
               styles.slideContent,
-              {
-                opacity: slideOpacity,
-                transform: [{ translateY: slideTranslate }],
-              },
+              { opacity: slideOpacity, transform: [{ translateY: slideTranslate }] },
             ]}
           >
-            <View style={styles.iconCircle}>
-              <Ionicons name={slide.icon as any} size={50} color={Colors.emerald} />
-            </View>
+            <Image source={SOLARIS_LOGO} style={styles.slideLogoSmall} resizeMode="contain" />
             
             <Text style={styles.slideTitle}>
               {slide.title}{' '}
-              {slide.highlight && <Text style={styles.highlight}>{slide.highlight}</Text>}
+              {slide.highlight ? <Text style={styles.highlight}>{slide.highlight}</Text> : null}
             </Text>
             
             <Text style={styles.slideSubtitle}>{slide.subtitle}</Text>
           </Animated.View>
 
-          {/* Progress dots */}
           <View style={styles.dotsContainer}>
             {slides.map((_, index) => (
-              <View
-                key={index}
-                style={[
-                  styles.dot,
-                  index === currentSlide && styles.dotActive,
-                ]}
-              />
+              <View key={index} style={[styles.dot, index === currentSlide && styles.dotActive]} />
             ))}
           </View>
 
-          {/* Actions */}
           <View style={styles.actions}>
             <Button
               title={currentSlide === slides.length - 1 ? 'Begin Journey' : 'Continue'}
@@ -201,78 +193,43 @@ export default function SplashScreen() {
               icon="arrow-forward"
               fullWidth
             />
-            
             {currentSlide < slides.length - 1 && (
-              <Button
-                title="Skip"
-                onPress={skipToAuth}
-                variant="ghost"
-                style={styles.skipButton}
-              />
+              <Button title="Skip" onPress={skipToAuth} variant="ghost" style={styles.skipButton} />
             )}
           </View>
         </View>
       )}
-
-      {/* Footer */}
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>AUTONOMOUS HEALTH PROTOCOL 4.0</Text>
-      </View>
-    </LinearGradient>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#000',
+  },
+  splashContainer: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  glowContainer: {
-    ...StyleSheet.absoluteFillObject,
-    overflow: 'hidden',
+  splashVideo: {
+    width: width * 0.7,
+    height: width * 0.7,
   },
-  glow: {
+  splashLogoFallback: {
     position: 'absolute',
-    width: 300,
-    height: 300,
-    borderRadius: 150,
-  },
-  glowTop: {
-    top: -100,
-    right: -50,
-    backgroundColor: Colors.glowEmerald,
-  },
-  glowBottom: {
-    bottom: -100,
-    left: -50,
-    backgroundColor: Colors.glowGold,
-  },
-  logoContainer: {
-    alignItems: 'center',
-  },
-  logoCircle: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
-    borderWidth: 2,
-    borderColor: 'rgba(16, 185, 129, 0.3)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  logoImage: {
+    width: width * 0.55,
+    height: width * 0.55,
+  },
+  slideLogoSmall: {
+    width: 80,
+    height: 80,
     marginBottom: 24,
-  },
-  logoText: {
-    fontSize: 36,
-    fontWeight: '700',
-    color: Colors.emerald,
-    letterSpacing: 8,
-  },
-  logoSubtext: {
-    fontSize: 12,
-    color: Colors.teal,
-    letterSpacing: 4,
-    marginTop: 8,
   },
   slideContainer: {
     flex: 1,
@@ -285,17 +242,6 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  iconCircle: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
-    borderWidth: 2,
-    borderColor: 'rgba(16, 185, 129, 0.3)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 32,
   },
   slideTitle: {
     fontSize: 32,
@@ -336,14 +282,5 @@ const styles = StyleSheet.create({
   },
   skipButton: {
     marginTop: 16,
-  },
-  footer: {
-    position: 'absolute',
-    bottom: 24,
-  },
-  footerText: {
-    fontSize: 10,
-    color: Colors.mediumGray,
-    letterSpacing: 2,
   },
 });
