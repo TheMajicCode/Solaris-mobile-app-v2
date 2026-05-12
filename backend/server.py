@@ -334,8 +334,21 @@ async def exchange_session(request: Request, response: Response):
     picture = auth_data.get("picture", "")
     session_token = auth_data.get("session_token")
     
-    # Check if user exists
-    existing_user = await db.users.find_one({"email": email}, {"_id": 0})
+    # Check if user exists - use email index, handle duplicates
+    existing_users = await db.users.find({"email": email}).to_list(10)
+    
+    if len(existing_users) > 1:
+        # Clean up duplicates - keep the first one
+        keep = existing_users[0]
+        for dup in existing_users[1:]:
+            await db.users.delete_one({"_id": dup["_id"]})
+            await db.user_sessions.delete_many({"user_id": dup.get("user_id")})
+            logger.info(f"Cleaned up duplicate user: {dup.get('user_id')}")
+        existing_user = keep
+    elif len(existing_users) == 1:
+        existing_user = existing_users[0]
+    else:
+        existing_user = None
     
     if existing_user:
         user_id = existing_user["user_id"]
@@ -395,7 +408,10 @@ async def exchange_session(request: Request, response: Response):
     )
     
     user = await db.users.find_one({"user_id": user_id}, {"_id": 0})
-    return user
+    # Include session_token in response for mobile clients
+    user_response = dict(user)
+    user_response["session_token"] = session_token
+    return user_response
 
 @api_router.get("/auth/me")
 async def get_me(user: dict = Depends(get_current_user)):
