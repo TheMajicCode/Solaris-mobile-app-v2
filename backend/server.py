@@ -244,7 +244,7 @@ class ChatMessage(BaseModel):
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class ChatRequest(BaseModel):
-    message: str
+    message: str = Field(..., min_length=1, max_length=4000)
     session_id: Optional[str] = None
 
 # ============= AUTHENTICATION =============
@@ -1481,9 +1481,11 @@ app.include_router(api_router)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    # Set CORS_ORIGINS to a comma-separated list of allowed origins in production.
+    allow_origins=[o.strip() for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()],
+    allow_origin_regex=os.environ.get("CORS_ORIGIN_REGEX") or None,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 @app.on_event("shutdown")

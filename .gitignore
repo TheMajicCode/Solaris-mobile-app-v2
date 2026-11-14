@@ -84,3 +84,7 @@ android-sdk/
 credentials.json
 *.key
 .credentials
+
+# Metro bundler cache (build artifact, may embed env values)
+.metro-cache/
+**/.metro-cache/
